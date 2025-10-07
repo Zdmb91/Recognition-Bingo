@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Recognition BINGO 4x4</title>
+<style>
+body { background: #fbeceb; font-family: 'Segoe UI',sans-serif; margin:0;}
+.main-wrap { max-width:660px; margin:0 auto; }
+#current, #timer, .draw-controls, .grid, #dialog-container { text-align:center; margin-left:auto; margin-right:auto;}
+#current { font-size: 1.27em; color: #e8275a; font-weight: 800; margin-top: 16px;}
+#timer {display:none; background:#fff4; color: #e8275a; font-size:1.25em; padding:10px 16px; border-radius:14px; margin-top:14px; max-width:250px;}
+#timer .btn {font-size:.98em; padding:5px 16px; margin-top:7px;}
+.draw-controls { margin-top: 14px; margin-bottom: 12px; }
+.btn { background: #e8275a; color: #fff; border: none; padding: 10px 22px; margin: 5.5px 10px; border-radius: 13px; font-size: 1.06rem; font-weight: 700; cursor: pointer;}
+.btn:disabled{background:#e193a0;}
+.grid { display: grid; grid-template-columns: repeat(4,1fr); gap:12px; max-width:450px; margin:30px auto 24px auto;}
+.square { background: #fff; border:2.1px solid #f7b6a8; border-radius:13px; min-height:75px; text-align:center; font-weight:600; font-size:1.09em; display: flex; flex-direction:column; align-items:center; justify-content:center; box-shadow:0 3px 16px #e6342822; cursor:pointer; transition:.23s;}
+.square.marked { background:linear-gradient(110deg,#e8275a 65%,#e87463 120%); color:#fff; border-color: #e8275a;}
+.square.highlighted { background: #fae6f0; color: #e8275a; border-color: #e8275a; }
+.name-text { font-size:0.97em; font-weight:400; background: #ffe1e3; color: #e8275a; border-radius: 4px; margin-top:8px; padding:2.3px 9px;}
+#calledItems { margin-top:8px;display:flex; flex-wrap:wrap;gap:8px; justify-content:center;}
+#calledItems span { background: #f8dcdd; color: #e9341c; border-radius: 6px; padding: 3.3px 11px; font-size:1.04em; font-weight: 600;}
+#dialog-container {
+    display: none;
+    position:fixed;
+    left:0; top:0; width:100vw; height:100vh;
+    background:rgba(200,80,90,0.14);
+    z-index:999;
+    text-align:center;
+}
+.dialog-box {
+    background:#fff;
+    color: #e8275a;
+    max-width:400px; width:93vw;
+    margin:46px auto 0 auto;
+    border-radius:14px;
+    padding: 18px 14px 22px 14px;
+    box-shadow: 0 4px 24px #e8275a48;
+    font-size:1em;
+    text-align:center;
+}
+.dialog-box h2 {margin-top:0;}
+.statement-input {margin-bottom: 8px; width:95%; border-radius:6px; border:1.4px solid #f8b8a5; padding:7px 7px; font-size:1em;}
+.dialog-box .btn {margin:7px 4px 0px 4px;}
+@media (max-width:600px){ .grid{max-width:95vw;} }
+</style>
+</head>
+<body>
+<div class="main-wrap">
+<div id="current"></div>
+<div id="timer"></div>
+<div class="draw-controls">
+  <button class="btn" id="drawBtn" onclick="drawRandom()">Draw Random Statement</button>
+  <button class="btn" onclick="openEditDialog()">Edit Statements</button>
+  <button class="btn" onclick="confirmNewBoard()">New Random Board</button>
+</div>
+<div class="grid" id="grid"></div>
+<div style="margin-top: 10px; text-align:center;">
+    <div style="font-weight:600;margin-bottom:3px;">Previously Called Statements (<span id="callCount">0</span>/25)</div>
+    <div id="calledItems"></div>
+</div>
+</div>
+
+<div id="dialog-container">
+  <div class="dialog-box">
+    <h2>Edit Phrases</h2>
+    <form id="phraseForm" onsubmit="saveStatements(event)">
+      <div id="inputs"></div>
+      <button type="submit" class="btn">Save</button>
+      <button type="button" class="btn" onclick="closeEditDialog()">Cancel</button>
+      <button type="button" class="btn" onclick="resetToDefaults()">Reset to Default</button>
+    </form>
+  </div>
+</div>
+
+<script>
+let defaultStatements=["Gave great feedback","Lightened the mood","Contributed a fresh perspective","Taught me something new","Mentored a teammate effectively","Shared knowledge","Handled a difficult situation gracefully","Boosted team morale","Removed a blocker","Showed strong initiative","Helped with a deadline","Provided invaluable support","Consistently met commitments","Made a complex topic easy to understand","Improved collaboration","Solved a problem creatively","Went above and beyond","Actively listened and understood","Demonstrated excellent leadership","Supported cross-functional goals","Championed a new idea/project","Proactively identified a need","Exceeded expectations on a task","Optimized a process or workflow","Maintained a positive attitude","Communicated clearly and concisely"];
+let stored, phrases;
+try {
+    stored = localStorage.getItem('statements-v1');
+    phrases = stored ? JSON.parse(stored) : defaultStatements.slice();
+    if(!Array.isArray(phrases) || phrases.length < 16) throw new Error();
+} catch(e) {
+    phrases = defaultStatements.slice();
+}
+
+let board=phrases.slice().sort(()=>Math.random()-0.5).slice(0,16);
+
+let names={}, called=new Set(), currentHighlight=null, timerInt=null, timerSec=15;
+let grid=document.getElementById('grid');
+
+function paint(){
+ grid.innerHTML=board.map((x,i)=> `<div class="square" data-i="${i}"><div>${x}</div><div class="name-text">${names[i]||""}</div></div>`).join('');
+ updateCalledList();
+}
+
+function updateCalledList() {
+    document.getElementById('callCount').textContent = called.size;
+    let calledItems = Array.from(called).map(i=>phrases[i]);
+    document.getElementById('calledItems').innerHTML = calledItems.map(x=>`<span>${x}</span>`).join('');
+}
+
+paint();
+
+grid.onclick = function(e){
+    let tgt = e.target.closest(".square"); if(!tgt) return;
+    tgt.classList.toggle("marked");
+    checkBingo();
+};
+
+grid.ondblclick = function(e){
+    let tgt = e.target.closest(".square");
+    if(!tgt) return;
+    let i = tgt.dataset.i;
+    let newName = prompt("Enter person's name for this recognition:", names[i]||"");
+    if(newName!==null) {
+        names[i]=newName.trim();
+        tgt.querySelector(".name-text").textContent=names[i];
+    }
+};
+
+let lastTap=0;
+grid.ontouchend = function(e){
+    let tgt = e.target.closest(".square");
+    if(!tgt) return;
+    let now = Date.now();
+    if(now - lastTap < 400){
+        let i = tgt.dataset.i;
+        let newName = prompt("Enter person's name for this recognition:", names[i]||"");
+        if(newName!==null) {
+            names[i]=newName.trim();
+            tgt.querySelector(".name-text").textContent=names[i];
+        }
+    }
+    lastTap = now;
+};
+
+function drawRandom(){
+ if(called.size===phrases.length){alert("All statements have been called!");return;}
+ let drawBtn=document.getElementById('drawBtn');
+ drawBtn.disabled=true;
+ let idx;
+ do{ idx=Math.floor(Math.random()*phrases.length);}
+ while(called.has(idx));
+ called.add(idx);
+ let currentPhrase=phrases[idx];
+ if(currentHighlight!==null){
+   let prev=document.querySelector(`.square[data-i="${currentHighlight}"]`);
+   if(prev) prev.classList.remove("highlighted");
+   currentHighlight=null;
+ }
+ let bIdx=board.indexOf(currentPhrase);
+ if(bIdx!==-1){
+   let sq=document.querySelector(`.square[data-i="${bIdx}"]`);
+   if(sq) { sq.classList.add("highlighted"); currentHighlight=bIdx;}
+ }
+ document.getElementById("current").textContent="Currently Called: "+currentPhrase;
+ updateCalledList();
+ startTimer();
+}
+
+function startTimer(){
+    let timerDiv=document.getElementById('timer');
+    let rem=timerSec;
+    timerDiv.innerHTML=`<span>Time Left: <span id="sec">${rem}</span>s</span> <button class='btn' onclick='cancelTimer()'>Cancel</button>`;
+    timerDiv.style.display='block';
+    timerInt=setInterval(function(){
+        rem--;
+        document.getElementById('sec').textContent=rem;
+        if(rem<=0){
+            cancelTimer();
+            alert("Time's up!");
+        }
+    },1000);
+}
+
+function cancelTimer(){
+    if(timerInt) {
+        clearInterval(timerInt);
+        timerInt = null;
+    }
+    document.getElementById('timer').style.display='none';
+    document.getElementById('drawBtn').disabled=false;
+}
+
+function checkBingo(){
+ const idxs=[...document.querySelectorAll('.square')].map((el,i)=>el.classList.contains('marked'));
+ for(let r=0;r<4;r++){
+   let all=true; for(let c=0;c<4;c++) if(!idxs[r*4+c]) all=false;
+   if(all) return setTimeout(()=>alert('🎉 BINGO! 🎉'),150);
+ }
+ for(let c=0;c<4;c++){
+   let all=true; for(let r=0;r<4;r++) if(!idxs[c+r*4]) all=false;
+   if(all) return setTimeout(()=>alert('🎉 BINGO! 🎉'),150);
+ }
+ if([0,5,10,15].every(i=>idxs[i]) || [3,6,9,12].every(i=>idxs[i])) return setTimeout(()=>alert('🎉 BINGO! 🎉'),150);
+}
+
+function openEditDialog() {
+    let d=document.getElementById('dialog-container');
+    let content="";
+    for(let i=0;i<25;i++){
+      content += `<input type="text" class="statement-input" id="edit${i}" value="${phrases[i]}"><br>`;
+    }
+    document.getElementById("inputs").innerHTML=content;
+    d.style.display="flex";
+}
+
+function closeEditDialog() {
+    document.getElementById("dialog-container").style.display="none";
+}
+
+function saveStatements(e){
+    e.preventDefault();
+    let arr=[];
+    for(let i=0;i<25;i++) {
+        let v=document.getElementById('edit'+i).value.trim();
+        if(!v){alert("No empty statements allowed."); return;}
+        arr.push(v);
+    }
+    phrases=arr;
+    localStorage.setItem('statements-v1', JSON.stringify(phrases));
+    closeEditDialog();
+    board=phrases.slice().sort(()=>Math.random()-0.5).slice(0,16);
+    names={}, called=new Set(), currentHighlight=null;
+    if(timerInt) {
+        clearInterval(timerInt);
+        timerInt = null;
+    }
+    paint();
+    document.getElementById("current").textContent="";
+    document.getElementById("timer").style.display='none';
+    document.getElementById('drawBtn').disabled=false;
+}
+
+function resetToDefaults() {
+    phrases=defaultStatements.slice();
+    localStorage.removeItem('statements-v1');
+    closeEditDialog();
+    board=phrases.slice().sort(()=>Math.random()-0.5).slice(0,16);
+    names={}, called=new Set(), currentHighlight=null;
+    if(timerInt) {
+        clearInterval(timerInt);
+        timerInt = null;
+    }
+    paint();
+    document.getElementById("current").textContent="";
+    document.getElementById("timer").style.display='none';
+    document.getElementById('drawBtn').disabled=false;
+}
+
+function confirmNewBoard() {
+    if(confirm("Are you sure you want to generate a new random board? This will reset marks, names and previous calls.")) {
+        board=phrases.slice().sort(()=>Math.random()-0.5).slice(0,16);
+        names={}, called=new Set(), currentHighlight=null;
+        if(timerInt) {
+            clearInterval(timerInt);
+            timerInt = null;
+        }
+        paint();
+        document.getElementById("current").textContent="";
+        document.getElementById("timer").style.display='none';
+        document.getElementById('drawBtn').disabled=false;
+    }
+}
+</script>
+</body>
+</html>
